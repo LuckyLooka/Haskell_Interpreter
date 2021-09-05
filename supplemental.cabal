@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      Interpreter7
       Lib
   other-modules:
       Paths_supplemental
@@ -32,6 +33,9 @@ library
       src
   build-depends:
       base >=4.7 && <5
+    , containers
+    , mtl
+    , parsec
   default-language: Haskell2010
 
 executable supplemental-exe
@@ -43,6 +47,9 @@ executable supplemental-exe
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , containers
+    , mtl
+    , parsec
     , supplemental
   default-language: Haskell2010
 
@@ -56,5 +63,8 @@ test-suite supplemental-test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , containers
+    , mtl
+    , parsec
     , supplemental
   default-language: Haskell2010

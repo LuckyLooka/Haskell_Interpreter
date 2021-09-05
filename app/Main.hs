@@ -1,6 +1,5 @@
 module Main where
 
-import Lib
+import Interpreter7
 
-main :: IO ()
-main = someFunc
+main = run prog10
