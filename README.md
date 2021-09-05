@@ -9,15 +9,14 @@ The above snippet when read by the interpreter adds the boolean expression `"scr
 
 Additional to this case : before the execution of every statement the program is also halted. 
 
-When the program is halted users are presented with a UI in the console informing the user of their available inputs: 
-
-`condbreak (scratch .> 5)  <-
+When the program is halted users are presented with a UI in the console informing the user of the next statement execution and of their available inputs: 
+```
+condbreak (scratch .> 5)  <-
 -------------------------------------------------------------------
-
 Program execution halted, please input one of the following options:
 'next' - To execute the next statement
 'list' - To show the current list of variables
 'print <var>': To print the value of a variable of your choice
-
 -------------------------------------------------------------------
->`
+>
+```
