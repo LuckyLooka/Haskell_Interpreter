@@ -20,7 +20,7 @@ Program execution halted, please input one of the following options:
 -------------------------------------------------------------------
 >
 ```
-## Section 2 :
+## Section 2
 Run monad modified to step through program. This was done by taking and acting on input with a `userprompt` function before a step action is called from `step (Seq s0 s1)`.
 ## Section 3
 `run` was modified to prompt the user interactively by handling IO within the step action, the variable environment is accessed within Run monad actions to allow users to print variables and list all variables at any point in program execution.
