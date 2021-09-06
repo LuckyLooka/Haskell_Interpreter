@@ -154,16 +154,21 @@ runRun p =  runExceptT ( runStateT p Map.empty)
 set :: (Name, Val) -> Run ()
 set (s,i) = state $ (\(table,exprlist) -> ((), (Map.insert s i table, exprlist)))
 
+--All exec actions renamed to step, some new Run actions are sequenced before and after step calls, namely:
+--printHandler, userprompt and checkbreakpoints. statements are pattern matched to determine if they are the last statement in a program or subprogram, in which case they
+--are printed and program halted before execution for user input.
+
 step :: Statement -> Run ()
 
 step (Assign s v) = do (env, _) <- get
                        case runEval env (eval v) of
                          Right val -> set (s,val)
                          Left err  -> throwError err
---All exec actions renamed to step, only other change is to the Seq case, where some Run actions are called in between statement steps, namely:
---printHandler, userprompt and checkbreakpoints
-step (Seq s0 s1) = do
-                      printHandler s0 >> userprompt >> step s0 >> checkbreakpoints >> printHandler s1  >> step s1 >> checkbreakpoints
+
+step (Seq s0 s1) = do sequenceSteps s0
+                      case s1 of
+                        (Seq _ _) ->step s1
+                        _         ->sequenceSteps s1
 
 step (Print e) = do (env, _) <- get
                     case  runEval env (eval e) of
@@ -173,16 +178,32 @@ step (Print e) = do (env, _) <- get
 step (If cond s0 s1) = do (env, _) <- get
                           case runEval env (eval cond) of
                             Right (B val) -> do
-                              if val then do step s0 else do step s1
+                              if val then do case s0 of
+                                              (Seq _ _ ) -> step s0 
+                                              _          -> sequenceSteps s0
+                              else do case s1 of
+                                              (Seq _ _ ) -> step s1 
+                                              _          -> sequenceSteps s1
                             Left err -> throwError err
 
 step (While cond s) = do (env, _) <- get
                          case runEval env (eval cond) of
                            Right (B val) -> do
-                             if val then do step s >> step (While cond s) else return ()
+                             if val then do case s of
+                                              (Seq _ _) -> step s >> step (While cond s)
+                                              _         -> sequenceSteps s >> step (While cond s)
+                             else return ()
                            Left err -> throwError err
 
-step (Try s0 s1) = do catchError (step s0) (\e -> step s1)
+step (Try s0 s1) = do case s0 of 
+                           (Seq _ _) -> step s0
+                           _         -> sequenceSteps s0
+                      `catchError` 
+                      case s1 of
+                           (Seq _ _) -> (\e -> step s1)
+                           _         -> (\e -> sequenceSteps s1)
+                           
+
 --when step is called on a Condbreak statement the expression is appended to the Exprlist using a State put action
 step (Condbreak e) = do (env, list) <- get
                         put (env, list ++ [e])
@@ -226,6 +247,7 @@ interactUser = do printoutString ">"
                   case input of
                     "next"           -> return()
                     "list"           -> do (env, _) <- get
+                                           printoutString "Variable list : "
                                            liftIO (System.print $ Map.toList env)
                                            interactUser
                     _                -> case take 5 input of
@@ -245,12 +267,16 @@ checkbreakpoints :: Run()
 checkbreakpoints = do (env, list) <- get
                       case list of
                         [] -> return()
-                        _  -> if Right (B False) `elem` evaluateList env list then printoutString("A conditional breakpoint has returned False\n") >> interactUser 
+                        _  -> if Right (B False) `elem` evaluateList env list then printoutString("A conditional breakpoint has returned False, program has been halted\n") >> interactUser 
                               else return()
 
 --maps runEval env over the Exprlist to evaluate all the conditional breakpoints
 evaluateList :: Env -> Exprlist -> [Either String Val]
 evaluateList env = map (runEval env . eval)
+
+--sequenceSteps sequences the print, userprompt, step and checkbreakpoints actions
+sequenceSteps ::Statement -> Run()
+sequenceSteps s =  printHandler s  >>userprompt >> step s >> checkbreakpoints
 
 --printHandler takes a Statement and prints a formatted version to assist debugging
 printHandler :: Statement -> Run ()
@@ -259,11 +285,11 @@ printHandler (Assign x y)     = printoutString(x ++" .= " ++show y ++"  <-")
 
 printHandler (Print x)        = printoutString("print $ var " ++ show x ++"  <-")
 
-printHandler (If cond _ _)    = printoutString("iif " ++show cond ++"  <-")
+printHandler (If cond _ _)    = printoutString("iif (" ++show cond ++")  <-")
 
 printHandler (While cond _)   = printoutString("while (" ++show cond ++")  <-")
 
-printHandler (Try s0 s1)      = printoutString"try "
+printHandler (Try s0 s1)      = printoutString"try ("
 
 printHandler (Condbreak e)    = printoutString("condbreak ("++show e ++")  <-")
 
@@ -434,9 +460,10 @@ Phew.
 After all that our embedded imperative language is ready to go. Here's the factorial function in all it's glory:
 --}
 
+--while & condbreak test
 prog10 :: Program
 prog10 = do
-           condbreak ("scratch" .> (5::Int))
+           condbreak ("scratch" .> (8::Int))
            "arg"     .= int 10
            "scratch" .= var "arg"
            "total"   .= int 1
@@ -447,6 +474,7 @@ prog10 = do
             )
            print $ var "total"
 
+--iif test
 prog11 :: Program
 prog11 = do
            "temp"   .= int 0
@@ -461,8 +489,10 @@ prog11 = do
            "temp3"  .= int 100
            print $ var "temp3"
 
+
+-- try test
 prog12 :: Program
 prog12 = do
-           "test"  .= int 0
-           "test2" .= int 1
-           "test3" .= int 2
+           "temp1" .= int 100
+           try (print $ var "test") (print $ var "temp1")
+           "temp2" .= int 2
