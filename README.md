@@ -27,4 +27,4 @@ Run monad modified to step through program. This was done by taking and acting o
 ## Section 4
 Interpreter extended to allow multiple conditional breakpoints, they can be entered into a program using the Condbreak Statement, which upon execution appends the expression to an expression list stored in a tuple maintained by the State monad within Run. After each statement execution the expressions are evaluated in the `checkbreakpoints` action, and if any of them evaluate to a Boolean False value then program execution is halted allowing variable inspection.
 ## Section 5
-Attempted parsing of statements using Text.Parsec to implement static analysis, with no success.
+None completed.
