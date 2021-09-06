@@ -27,6 +27,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 
+--added parsec to attempt static analysis by parsing program statements
 import qualified Text.Parsec as P
 
 {-------------------------------------------------------------------}
@@ -60,6 +61,7 @@ instance Show Expr where
     show (Lt e1 e2)  = show e1 ++" .< "  ++show e2
     show (Var str) = str
 
+--Exprlist type for conditional breakpoint state storage
 type Exprlist = [Expr]
 
 type Name = String
@@ -138,13 +140,14 @@ data Statement = Assign String Expr
                | Print Expr
                | Seq Statement Statement
                | Try Statement Statement
-               | Condbreak Expr
+               | Condbreak Expr         --Condbreak statement will take an Expr and add it to Exprlist
                | Pass
       deriving (Eq, Show)
 
 -- The 'Pass' statement is useful when making Statement an instance of
 -- Monoid later on, we never actually expect to see it in a real program.
 
+--Run monad modified to maintain a tuple as its state in order to keep and update the conditional breakpoint expressions
 type Run a = StateT (Env, Exprlist) (ExceptT String IO) a
 runRun p =  runExceptT ( runStateT p Map.empty)
 
@@ -157,7 +160,8 @@ step (Assign s v) = do (env, _) <- get
                        case runEval env (eval v) of
                          Right val -> set (s,val)
                          Left err  -> throwError err
-
+--All exec actions renamed to step, only other change is to the Seq case, where some Run actions are called in between statement steps, namely:
+--printHandler, userprompt and checkbreakpoints
 step (Seq s0 s1) = do
                       printHandler s0 >> userprompt >> step s0 >> checkbreakpoints >> printHandler s1  >> step s1 >> checkbreakpoints
 
@@ -179,7 +183,7 @@ step (While cond s) = do (env, _) <- get
                            Left err -> throwError err
 
 step (Try s0 s1) = do catchError (step s0) (\e -> step s1)
-
+--when step is called on a Condbreak statement the expression is appended to the Exprlist using a State put action
 step (Condbreak e) = do (env, list) <- get
                         put (env, list ++ [e])
 
@@ -202,30 +206,33 @@ because we have to pass through StateT and ExceptT to reach the IO monad.
 printout :: Val -> Run ()
 printout = liftIO . System.print
 
+--like printout but prints a string
 printoutString :: String -> Run()
 printoutString = liftIO . putStr
 
-waitstep :: Run String
-waitstep = liftIO getLine
-
+--Run action that outputs terminal instructions for the user before calling interactUser
 userprompt :: Run()
 userprompt = do printoutString "\n-------------------------------------------------------------------\n"
                 printoutString "\nProgram execution halted, please input one of the following options: \n'next' - To execute the next statement \n'list' - To show the current list of variables \n'print <var>': To print the value of a variable of your choice\n"
                 printoutString "\n-------------------------------------------------------------------\n"
-                interact2
+                interactUser
 
-interact2 :: Run ()
-interact2 = do printoutString ">"
-               input <- waitstep
-               case input of
-                 "next"           -> return()
-                 "list"           -> do (env, _) <- get
-                                        liftIO (System.print $ Map.toList env)
-                                        interact2
-                 _                -> case take 5 input of
-                                      "print"   -> showvar (drop 6 input) >> interact2
-                                      _         -> interact2
+--Run action that pattern matches user input: 
+--In the case that 'next' is the input the action is exited, if 'list' is input then the entire variable map is printed to console,
+--if print is input following a variable name the showvar function is called. In every case other than 'next' interactUser is recursively called.
+interactUser :: Run ()
+interactUser = do printoutString ">"
+                  input <- liftIO getLine
+                  case input of
+                    "next"           -> return()
+                    "list"           -> do (env, _) <- get
+                                           liftIO (System.print $ Map.toList env)
+                                           interactUser
+                    _                -> case take 5 input of
+                                         "print"   -> showvar (drop 6 input) >> interactUser
+                                         _         -> interactUser
 
+--showvar takes a string, gets a state, and attempts to lookup the string as a key in the map stored in the state, if a value is found, it is printed.
 showvar :: String -> Run()
 showvar str  = do
                   (env, _) <- get
@@ -233,16 +240,19 @@ showvar str  = do
                     Just x   -> printout x
                     Nothing  -> printoutString("Variable not found: " ++str ++"\n")
 
+--checkbreakpoints gets the state, exits if exprlist is empty, and otherwise evaluates each item in list, in the the case that any return False, interactUser is called to halt program
 checkbreakpoints :: Run()
 checkbreakpoints = do (env, list) <- get
                       case list of
                         [] -> return()
-                        _  -> if Right (B False) `elem` evaluateList env list then printoutString("A conditional breakpoint has returned False\n") >> interact2 
+                        _  -> if Right (B False) `elem` evaluateList env list then printoutString("A conditional breakpoint has returned False\n") >> interactUser 
                               else return()
 
-evaluateList :: Env -> [Expr] -> [Either String Val]
+--maps runEval env over the Exprlist to evaluate all the conditional breakpoints
+evaluateList :: Env -> Exprlist -> [Either String Val]
 evaluateList env = map (runEval env . eval)
 
+--printHandler takes a Statement and prints a formatted version to assist debugging
 printHandler :: Statement -> Run ()
 
 printHandler (Assign x y)     = printoutString(x ++" .= " ++show y ++"  <-")
@@ -291,6 +301,7 @@ instance SmartAssignment Expr where
 
 -- going further with this (and only providing the classes and instances we actually usein the example program, but there could be others)
 
+--added extra syntactic sugar
 class PrettyExpr a b where
   (.*) :: a -> b -> Expr
   (.-) :: a -> b -> Expr
@@ -375,6 +386,8 @@ Executing a "program" means compiling it and then running the
 resulting Statement with an empty variable map.
 --}
 
+
+--replaced exec with step and updated initial state value to a tuple.
 run :: Program -> IO ()
 run program = do result <- runExceptT $ (runStateT $  step $ snd $ runIdentity $ (runWriterT program)) (Map.empty, [])
                  case result of
@@ -414,19 +427,7 @@ condbreak ex = tell $ Condbreak ex
 
 {--static analysis--}
 
-parse rule text = P.parse rule "(source)" text
 
-myParser :: P.Parsec String () (String)
-myParser = do
-    P.skipMany P.letter P.<|>  P.spaces
-    digits <- P.string "Assign"
-    return (digits)
-
-uninitvarCheck :: Statement -> [Expr]
-uninitvarCheck prog = []
-
-unusedvarCheck :: Statement -> [Expr]
-unusedvarCheck prog = []
 {--
 Phew.
 
