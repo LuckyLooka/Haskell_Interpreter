@@ -15,6 +15,8 @@ import Prelude hiding (lookup, print)
 import qualified Data.Map as Map
 import Data.Maybe
 
+import Data.List hiding(lookup) 
+
 -- I want to get at the standard "print" function using the name System.print
 
 import qualified System.IO as System
@@ -29,6 +31,7 @@ import Control.Monad.Writer
 
 --added parsec to attempt static analysis by parsing program statements
 import qualified Text.Parsec as P
+import GHC.IO.Encoding.Types (BufferCodec(getState))
 
 {-------------------------------------------------------------------}
 {- The pure expression language                                    -}
@@ -147,6 +150,7 @@ data Statement = Assign String Expr
 -- The 'Pass' statement is useful when making Statement an instance of
 -- Monoid later on, we never actually expect to see it in a real program.
 
+
 --Run monad modified to maintain a tuple as its state in order to keep and update the conditional breakpoint expressions
 type Run a = StateT (Env, Exprlist) (ExceptT String IO) a
 runRun p =  runExceptT ( runStateT p Map.empty)
@@ -154,9 +158,11 @@ runRun p =  runExceptT ( runStateT p Map.empty)
 set :: (Name, Val) -> Run ()
 set (s,i) = state $ (\(table,exprlist) -> ((), (Map.insert s i table, exprlist)))
 
---All exec actions renamed to step, some new Run actions are sequenced before and after step calls, namely:
---printHandler, userprompt and checkbreakpoints. statements are pattern matched to determine if they are the last statement in a program or subprogram, in which case they
---are printed and program halted before execution for user input.
+--All exec actions are renamed to step, some new Run actions are sequenced before and after step calls, namely:
+--printHandler, userprompt and checkbreakpoints. statements are pattern matched for a Seq statement to determine if they are the last/only statement in a program or subprogram.
+--In such a case the aforementioned actions are called, otherwise they are called in the Seq function. This section is quite messy and took some messing with
+--to get working properly.
+
 
 step :: Statement -> Run ()
 
@@ -417,9 +423,7 @@ resulting Statement with an empty variable map.
 run :: Program -> IO ()
 run program = do result <- runExceptT $ (runStateT $  step $ snd $ runIdentity $ (runWriterT program)) (Map.empty, [])
                  case result of
-                      Right ( (), (env,_)) -> do
-                                              System.print (env Map.! "arg")
-                                              return ()
+                      Right ( (), (env,_)) -> do return ()
                       Left exn -> System.print ("Uncaught exception: "++exn)
 
 {--
@@ -452,8 +456,8 @@ condbreak ex = tell $ Condbreak ex
 
 
 {--static analysis--}
-
-
+                            
+                               
 {--
 Phew.
 
@@ -493,6 +497,7 @@ prog11 = do
 -- try test
 prog12 :: Program
 prog12 = do
+           condbreak ("temp2" .== (3::Int))
            "temp1" .= int 100
            try (print $ var "test") (print $ var "temp1")
            "temp2" .= int 2
