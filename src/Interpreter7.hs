@@ -3,6 +3,8 @@
 {-# Language MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# LANGUAGE BlockArguments #-}
+--added flexible contexts to use parser
+{-# Language FlexibleContexts #-}
 
 module Interpreter7 where
 
@@ -25,9 +27,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 
-import Text.ParserCombinators.Parsec
-import qualified Text.ParserCombinators.Parsec.Token as P
-import Text.ParserCombinators.Parsec.Language
+import qualified Text.Parsec as P
 
 {-------------------------------------------------------------------}
 {- The pure expression language                                    -}
@@ -414,6 +414,13 @@ condbreak ex = tell $ Condbreak ex
 
 {--static analysis--}
 
+parse rule text = P.parse rule "(source)" text
+
+myParser :: P.Parsec String () (String)
+myParser = do
+    P.skipMany P.letter P.<|>  P.spaces
+    digits <- P.string "Assign"
+    return (digits)
 
 uninitvarCheck :: Statement -> [Expr]
 uninitvarCheck prog = []
